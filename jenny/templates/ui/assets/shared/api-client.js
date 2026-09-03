@@ -166,6 +166,19 @@ class ApiClient {
     return res.json();
   }
 
+  async getFavoriteApps() {
+    const res = await this._fetch('/api/webui/favorite-apps');
+    if (!res.ok) throw new Error(`Favorite apps failed: ${res.status}`);
+    return res.json();
+  }
+
+  async setFavoriteApps(packages) {
+    const state = encodeURIComponent(JSON.stringify({ packages }));
+    const res = await this._fetch(`/api/webui/favorite-apps/update?state=${state}`);
+    if (!res.ok) throw new Error(`Favorite apps update failed: ${res.status}`);
+    return res.json();
+  }
+
   async getJennyApps() {
     const res = await this._fetch('/api/webui/apps');
     if (!res.ok) throw new Error(`Jenny apps failed: ${res.status}`);
