@@ -266,6 +266,73 @@ console.log(JSON.stringify(first));
     assert json.loads(out) == ["ananas", "Órso", "Zebra"]
 
 
+# ── preferiti in cima a "Più usate" ──────────────────────────────────────────
+
+def test_favorites_come_first_in_most_used_regardless_of_usage() -> None:
+    """Un preferito mai aperto deve comunque stare sopra una voce molto usata
+    ma non preferita: è una scelta esplicita, non un'euristica che l'uso può
+    scavalcare."""
+    out = _run_js(
+        f"""
+const entries = {_entries_js([
+    {"key": "android:a", "name": "Alfa", "description": "", "favorite": False},
+    {"key": "android:b", "name": "Beta", "description": "", "favorite": True},
+    {"key": "android:c", "name": "Gamma", "description": "", "favorite": False},
+])};
+const usage = new UsageRanking(fakeStorage());
+usage.record('android:a', 1000);
+usage.record('android:a', 2000);
+usage.record('android:a', 3000);
+usage.record('android:c', 500);
+// "Beta" non ha mai storia d'uso ma è preferita: comunque in cima.
+assert.deepEqual(rankEntries(entries, '', usage, 'it').map(e => e.key),
+                 ['android:b', 'android:a', 'android:c']);
+console.log(JSON.stringify({{ok: true}}));
+"""
+    )
+    assert json.loads(out)["ok"] is True
+
+
+def test_favorite_priority_is_ignored_while_searching() -> None:
+    """Chi digita una query vuole ciò che corrisponde alla ricerca, non i
+    preferiti: la pertinenza resta il primo criterio anche per una voce
+    preferita con un riscontro debole."""
+    out = _run_js(
+        f"""
+const entries = {_entries_js([
+    {"key": "android:tel", "name": "Telefono", "description": "com.android.dialer", "favorite": False},
+    {"key": "android:settings", "name": "Impostazioni", "description": "controlla il telefono", "favorite": True},
+])};
+const usage = new UsageRanking(null);
+// "tel" attacca il nome di Telefono e sta a metà parola in Impostazioni:
+// la pertinenza vince anche se Impostazioni è preferita.
+assert.deepEqual(rankEntries(entries, 'tel', usage, 'it').map(e => e.key),
+                 ['android:tel', 'android:settings']);
+console.log(JSON.stringify({{ok: true}}));
+"""
+    )
+    assert json.loads(out)["ok"] is True
+
+
+def test_multiple_favorites_still_order_by_usage_among_themselves() -> None:
+    """Il criterio preferiti raggruppa in cima, ma non appiattisce l'ordine
+    dentro il gruppo: fra due preferiti vince ancora chi si usa di più."""
+    out = _run_js(
+        f"""
+const entries = {_entries_js([
+    {"key": "android:a", "name": "Alfa", "description": "", "favorite": True},
+    {"key": "android:b", "name": "Beta", "description": "", "favorite": True},
+])};
+const usage = new UsageRanking(fakeStorage());
+usage.record('android:b', 1000);
+assert.deepEqual(rankEntries(entries, '', usage, 'it').map(e => e.key),
+                 ['android:b', 'android:a']);
+console.log(JSON.stringify({{ok: true}}));
+"""
+    )
+    assert json.loads(out)["ok"] is True
+
+
 # ── D9 — lo storage è un dettaglio che può mancare ──────────────────────────
 
 def test_a_broken_or_missing_storage_degrades_to_alphabetical() -> None:

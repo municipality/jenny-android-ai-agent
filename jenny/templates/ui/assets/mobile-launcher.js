@@ -140,6 +140,15 @@ export class LauncherController {
     // apertura: leggere una riga di localStorage costa meno di decidere se
     // leggerla, e il ranking serve già al primo disegno.
     this._usage = new UsageRanking(window.localStorage);
+    /* Le due intestazioni «Preferiti» / «Più usate» che separano le sezioni a
+       campo vuoto (v. `_renderList`). `null` finché non servono davvero:
+       costruirle già qui, nel costruttore, le scriverebbe con le chiavi
+       grezze — al boot `i18n.load()` non è ancora tornata (è asincrona) — e
+       restando in cache per sempre non si correggerebbero mai da sole. Si
+       creano invece la prima volta che `_renderList` le disegna, cioè
+       nell'apertura del foglio, quando le traduzioni sono ormai arrivate. */
+    this._favoritesHeading = null;
+    this._mostUsedHeading = null;
     /* L'altezza del viewport **senza tastiera**, da cui si calcola quella del
        foglio. Serve ricordarla perché su questo guscio la finestra si
        ridimensiona davvero quando la tastiera software sale (misurato: 432 →
@@ -214,8 +223,13 @@ export class LauncherController {
        chiavi grezze in un foglio che nessuno sta guardando. */
     i18n.onLocaleChange(() => {
       // Le righe portano dentro testo tradotto (il tipo, l'errore di un
-      // manifest rotto): la cache va buttata, non riordinata.
+      // manifest rotto): la cache va buttata, non riordinata. Le due
+      // intestazioni di sezione sono nella stessa barca — anche loro
+      // costruite con `i18n.t()` — e tornano a `null` per farsi ricreare da
+      // `_renderList` con la lingua nuova.
       this._rows.clear();
+      this._favoritesHeading = null;
+      this._mostUsedHeading = null;
       this._render();
     });
 
@@ -736,7 +750,24 @@ export class LauncherController {
        spostati, non ricreati, e quelli fuori dai risultati si staccano ma
        sopravvivono in `this._rows`. Una sola scrittura sul DOM per tasto. */
     this._setListRole(true);
-    this.list.replaceChildren(...ranked.map(entry => this._rows.get(entry.key).el));
+    const rowNodes = ranked.map(entry => this._rows.get(entry.key).el);
+    /* A campo vuoto le due sezioni si vedono separate (Preferiti sopra, Più
+       usate sotto): `rankEntries` le tiene già in quest'ordine, qui si inserisce
+       solo l'intestazione fra le due — e solo se **entrambe** esistono, perché
+       un'intestazione sola sopra tutta la lista non separerebbe niente.
+       A campo pieno niente intestazioni: `rankEntries` spegne il criterio
+       "preferito" durante la ricerca (v. `shared/launcher-rank.js`), quindi la
+       divisione qui non avrebbe senso da mostrare. */
+    if (!query.trim()) {
+      const favoriteCount = ranked.filter(entry => entry.favorite).length;
+      if (favoriteCount > 0 && favoriteCount < ranked.length) {
+        this._favoritesHeading ||= this._sectionHeading('launcher.favoritesSection');
+        this._mostUsedHeading ||= this._sectionHeading('launcher.mostUsedSection');
+        rowNodes.splice(favoriteCount, 0, this._mostUsedHeading);
+        rowNodes.unshift(this._favoritesHeading);
+      }
+    }
+    this.list.replaceChildren(...rowNodes);
     // La lista è stata riordinata sotto il dito: si riparte dall'alto, dove sta
     // il risultato migliore. Senza questo, dopo aver scorso e poi digitato si
     // resterebbe a metà di una lista che nel frattempo si è accorciata.
@@ -948,6 +979,17 @@ export class LauncherController {
     this.titleEl.dataset.i18n = key;
     this.titleEl.textContent = i18n.t(key);
     this.clearBtn?.classList.toggle('visible', !!query);
+  }
+
+  /** Un'intestazione di sezione statica per la lista a campo vuoto (3.3): la
+   *  stessa idea di `.apps-favorites-heading` nella scheda di gestione, qui
+   *  come riga della lista invece che come cella della griglia. */
+  _sectionHeading(key) {
+    const heading = document.createElement('div');
+    heading.className = 'launcher-section-heading';
+    heading.dataset.i18n = key;
+    heading.textContent = i18n.t(key);
+    return heading;
   }
 
   _note(key, params) {

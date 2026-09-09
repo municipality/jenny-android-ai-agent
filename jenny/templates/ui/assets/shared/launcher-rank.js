@@ -179,11 +179,16 @@ export class UsageRanking {
   }
 }
 
-/** Le voci filtrate e ordinate: pertinenza, poi frequenza, poi recenza (3.3).
+/** Le voci filtrate e ordinate: pertinenza, poi preferiti, poi frequenza, poi
+ *  recenza (3.3).
  *
- *  A campo vuoto la pertinenza è 0 per tutti e l'ordine diventa "quel che usi,
- *  in cima" — con le mai aperte in coda in ordine alfabetico, che è l'unico
- *  ordine sensato per una lista di cui non si sa ancora niente.
+ *  A campo vuoto la pertinenza è 0 per tutti e l'ordine diventa "i preferiti
+ *  prima, poi quel che usi" — con le mai aperte in coda in ordine alfabetico,
+ *  che è l'unico ordine sensato per una lista di cui non si sa ancora niente.
+ *  Il criterio "preferito" salta invece quando si sta cercando: chi digita
+ *  vuole l'app che corrisponde alla query, non quella che ha scelto ieri —
+ *  e con la pertinenza già a decidere l'ordine, un preferito irrilevante in
+ *  cima ai risultati sarebbe rumore, non una scorciatoia.
  *
  *  Non muta `entries` e non tiene stato: la si può chiamare a ogni tasto.
  *
@@ -202,6 +207,11 @@ export function rankEntries(entries, query, usage, locale) {
   }
   scored.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
+    if (!terms.length) {
+      const fa = a.entry.favorite ? 1 : 0;
+      const fb = b.entry.favorite ? 1 : 0;
+      if (fa !== fb) return fb - fa;
+    }
     const ua = usage.get(a.entry.key);
     const ub = usage.get(b.entry.key);
     if (ua.count !== ub.count) return ub.count - ua.count;

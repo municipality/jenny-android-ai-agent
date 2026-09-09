@@ -70,6 +70,8 @@ export class AppsController {
     this.hiddenPackages = new Set();
     this._hiddenLoaded = false;
     this._showHidden = false;
+    this.favoritePackages = new Set();
+    this._favoritesLoaded = false;
     this._pendingReload = false;
     this._androidRefreshTimer = null;
     this._androidLoadSeq = 0;
@@ -81,7 +83,7 @@ export class AppsController {
        per guasto e uno vuoto per davvero sono indistinguibili. È esattamente il
        limite che `docs/using/app-launcher.md` denunciava. Qui restano separati,
        e il cassetto ci scrive sopra un avviso invece di un "nessuna app". */
-    this._loadFailed = { skills: false, android: false, jenny: false, hidden: false };
+    this._loadFailed = { skills: false, android: false, jenny: false, hidden: false, favorites: false };
     /* Chi vuole essere avvisato quando una delle tre liste cambia. Esiste per
        il cassetto (D5): i dati restano di questo controller — il ricaricamento
        delle app Android, l'elenco delle nascoste, `onPackageChanged`, i frame
@@ -250,11 +252,14 @@ export class AppsController {
     showToast(message, 'success');
   }
 
-  /** Un pacchetto disinstallato non deve restare nell'elenco delle nascoste:
-   *  altrimenti una futura reinstallazione ricomparirebbe già invisibile. */
+  /** Un pacchetto disinstallato non deve restare nell'elenco delle nascoste né
+   *  fra i preferiti: altrimenti una futura reinstallazione ricomparirebbe già
+   *  invisibile, o preferita sul niente. */
   _forgetHiddenPackages(packageNames) {
     const removed = packageNames.filter(pkg => this.hiddenPackages.delete(pkg));
     if (removed.length) this._persistHiddenApps();
+    const unfavorited = packageNames.filter(pkg => this.favoritePackages.delete(pkg));
+    if (unfavorited.length) this._persistFavoriteApps();
   }
 
   async loadHiddenApps() {
@@ -273,6 +278,27 @@ export class AppsController {
   async _persistHiddenApps() {
     try {
       await api.setHiddenApps([...this.hiddenPackages]);
+    } catch {
+      // best-effort: the in-memory set still reflects the user's choice
+    }
+  }
+
+  async loadFavoriteApps() {
+    try {
+      const data = await api.getFavoriteApps();
+      this.favoritePackages = new Set(data.packages || []);
+      this._loadFailed.favorites = false;
+    } catch {
+      this.favoritePackages = new Set();
+      this._loadFailed.favorites = true;
+    }
+    this._favoritesLoaded = true;
+    this.render();
+  }
+
+  async _persistFavoriteApps() {
+    try {
+      await api.setFavoriteApps([...this.favoritePackages]);
     } catch {
       // best-effort: the in-memory set still reflects the user's choice
     }
@@ -324,16 +350,17 @@ export class AppsController {
     if (!this._androidAppsLoaded || this._loadFailed.android) this.loadAndroidApps();
     if (!this._jennyAppsLoaded || this._loadFailed.jenny) this.loadJennyApps();
     if (!this._hiddenLoaded || this._loadFailed.hidden) this.loadHiddenApps();
+    if (!this._favoritesLoaded || this._loadFailed.favorites) this.loadFavoriteApps();
   }
 
-  /** Vero finché una delle quattro fetch iniziali non è tornata. Distingue
+  /** Vero finché una delle cinque fetch iniziali non è tornata. Distingue
    *  "non c'è niente" da "non è ancora arrivato niente". */
   isLoadingLists() {
     return !(this._skillsLoaded && this._jennyAppsLoaded
-             && this._androidAppsLoaded && this._hiddenLoaded);
+             && this._androidAppsLoaded && this._hiddenLoaded && this._favoritesLoaded);
   }
 
-  /** Almeno una delle quattro liste non si è potuta leggere (6.2).
+  /** Almeno una delle cinque liste non si è potuta leggere (6.2).
    *
    *  Terza risposta accanto a `isLoadingLists()` e a "l'elenco è vuoto", e le
    *  tre non si sovrappongono: un guasto **non** lascia la UI in caricamento —
@@ -401,7 +428,7 @@ export class AppsController {
         searchText: [app.description, app.slug, problem].filter(Boolean).join(' '),
       });
     }
-    if (this._androidAppsLoaded && this._hiddenLoaded) {
+    if (this._androidAppsLoaded && this._hiddenLoaded && this._favoritesLoaded) {
       for (const app of this.androidApps) {
         if (this.hiddenPackages.has(app.packageName)) continue;
         entries.push({
@@ -411,6 +438,11 @@ export class AppsController {
           description: app.packageName,
           problem: null,
           searchText: app.packageName,
+          // Il cassetto la legge per portare i preferiti in cima a "Più
+          // usate" (`rankEntries`, `shared/launcher-rank.js`). Solo le app
+          // Android hanno un concetto di preferito oggi — Jenny App e skill
+          // restano `undefined`, che `rankEntries` legge come "non preferita".
+          favorite: this.favoritePackages.has(app.packageName),
         });
       }
     }
@@ -919,10 +951,10 @@ export class AppsController {
     const scroll = this._roomScroll();
     wrap.appendChild(scroll);
 
-    /* Si aspettano **entrambe** le liste prima di disegnare una cella: sulla
-       corsa del primo caricamento una app nascosta comparirebbe per un istante.
-       Stessa guardia di `launcherEntries()`. */
-    const ready = this._androidAppsLoaded && this._hiddenLoaded;
+    /* Si aspettano **tutte e tre** le liste prima di disegnare una cella: sulla
+       corsa del primo caricamento una app nascosta (o preferita) comparirebbe
+       per un istante. Stessa guardia di `launcherEntries()`. */
+    const ready = this._androidAppsLoaded && this._hiddenLoaded && this._favoritesLoaded;
     if (!ready || this._loadFailed.android) {
       scroll.appendChild(this._note(ready ? 'apps.loadFailed' : 'apps.loading'));
       return wrap;
@@ -931,6 +963,16 @@ export class AppsController {
     const visible = this.androidApps.filter(app =>
       (this._showHidden || !this.hiddenPackages.has(app.packageName))
       && this._matches(q, app.label, app.packageName));
+
+    /* Il gruppo Preferiti non c'è quando si cerca: chi filtra vuole trovare
+       un'app precisa, non rileggersi i preferiti che probabilmente sa già a
+       memoria. */
+    if (!q) {
+      const favorites = visible.filter(app => this.favoritePackages.has(app.packageName));
+      if (favorites.length) {
+        scroll.appendChild(this._buildFavoritesSection(favorites));
+      }
+    }
 
     const grid = document.createElement('div');
     grid.className = 'apps-grid';
@@ -1005,6 +1047,29 @@ export class AppsController {
       rail.appendChild(btn);
     }
     return rail;
+  }
+
+  /** La sezione «Preferiti» in cima alla griglia: le app preferite col foglio
+   *  delle azioni, nello stesso ordine in cui compaiono nella lista alfabetica
+   *  completa. Qui l'ordine resta alfabetico — è la scheda di gestione, non il
+   *  cassetto — ma lo stato "preferito" è lo stesso che `launcherEntries()`
+   *  espone al cassetto per portare i preferiti in cima a "Più usate"
+   *  (`shared/launcher-rank.js`): un'unica fonte di verità, due presentazioni. */
+  _buildFavoritesSection(favoriteApps) {
+    const section = document.createElement('div');
+    section.className = 'apps-favorites';
+
+    const heading = document.createElement('div');
+    heading.className = 'apps-favorites-heading';
+    heading.textContent = i18n.t('apps.favoritesSection');
+    section.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'apps-grid apps-favorites-grid';
+    for (const app of favoriteApps) grid.appendChild(this._buildAndroidCell(app));
+    section.appendChild(grid);
+
+    return section;
   }
 
   _buildAndroidCell(app) {
@@ -1386,6 +1451,7 @@ export class AppsController {
     if (!sheet) return;
 
     const isHidden = this.hiddenPackages.has(packageName);
+    const isFavorite = this.favoritePackages.has(packageName);
     const icon = app.icon
       ? `<img src="${escapeHtml(app.icon)}" alt="">`
       : '<i class="ti ti-apps"></i>';
@@ -1402,6 +1468,9 @@ export class AppsController {
     if (!app.system) {
       actions.push({ icon: 'ti-trash', label: i18n.t('apps.uninstall'), action: 'uninstall', danger: true });
     }
+    actions.push(isFavorite
+      ? { icon: 'ti-star-off', label: i18n.t('apps.removeFromFavorites'), action: 'unfavorite' }
+      : { icon: 'ti-star', label: i18n.t('apps.addToFavorites'), action: 'favorite' });
     actions.push(isHidden
       ? { icon: 'ti-eye', label: i18n.t('apps.show'), action: 'unhide' }
       : { icon: 'ti-eye-off', label: i18n.t('apps.hide'), action: 'hide' });
@@ -1454,6 +1523,14 @@ export class AppsController {
     } else if (action === 'unhide') {
       this.hiddenPackages.delete(pkg);
       this._persistHiddenApps();
+      this.render();
+    } else if (action === 'favorite') {
+      this.favoritePackages.add(pkg);
+      this._persistFavoriteApps();
+      this.render();
+    } else if (action === 'unfavorite') {
+      this.favoritePackages.delete(pkg);
+      this._persistFavoriteApps();
       this.render();
     }
   }

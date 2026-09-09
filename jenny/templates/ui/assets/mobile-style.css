@@ -3176,6 +3176,26 @@ body {
   gap: 14px 4px;
 }
 
+/* Sezione «Preferiti»: le app preferite, separate dal resto da un'intestazione
+   e un bordo sottile — non un colore diverso, che nella griglia densa si legge
+   solo come rumore. */
+.apps-favorites {
+  margin: 0 0 16px;
+  padding: 0 0 14px;
+  border-bottom: 0.5px solid var(--border);
+}
+.apps-favorites-heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+.apps-favorites-grid {
+  gap: 14px 4px;
+}
+
 .app-cell {
   display: flex; flex-direction: column; align-items: center;
   gap: 5px; cursor: pointer; padding: 6px 2px;
@@ -3557,6 +3577,23 @@ body {
      è il launcher del dispositivo, non porterebbe via a un'altra app ma
      smonterebbe tutti gli overlay e collasserebbe ogni controller. */
 }
+
+/* Le intestazioni «Preferiti» / «Più usate» che separano le due sezioni a
+   campo vuoto (v. `LauncherController._renderList`): stessa lettura di
+   `.apps-favorites-heading` nella scheda di gestione, qui come riga della
+   lista invece che come cella della griglia. La prima non ha bisogno di uno
+   spazio sopra — la lista ha già il suo padding — la seconda sì, per non
+   sembrare incollata all'ultima riga dei preferiti. */
+.launcher-section-heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 4px 2px 0;
+  flex-shrink: 0;
+}
+.launcher-section-heading:not(:first-child) { margin-top: 4px; }
 
 /* La riga è attivabile col tocco, e lo dice: `cursor`, stato premuto, anello di
    fuoco. `flex-shrink: 0` perché la lista è un flex column che scorre — senza,
